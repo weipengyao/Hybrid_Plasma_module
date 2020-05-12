@@ -185,7 +185,6 @@ def time_evolution():
     E0 = 0.5*1.672621898e-27*c0**2.0
     #from here we are in the fluid's frame of reference
     for i in range(Ntime):
-        print(vec)
         v = linalg.norm(vec)                            #norm of the particle velocity in fluid's frame
         x = v/vT                                        #velocity ratio this is sqrt(x) = v/vT
         flim = limiting_factor(dt, G, v, vT, Ac, Bc)    #limiting factor computation
