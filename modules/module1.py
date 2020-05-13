@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 class Hybrid_Plasma:
     pass
     def __init__(self, N):
-        self.N = N #particle number in the beam
+        self.N = N #number of particles in the beam
 
     def run_program(self):
         (t, vx, vy, vz, v) = md2.sherlock_func(self.N)
