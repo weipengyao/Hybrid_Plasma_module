@@ -33,16 +33,19 @@ def parameters():
 
 #### SPECIAL FUNCTION DEFINITION ########
 def G(x):
-    derf = (2.0 / np.sqrt(np.pi))*np.exp(-x**2.0) #error function derivative
-    return (sp.erf(x) - x*derf)/(2.0*x**2.0)
-    #return x / (2.0*x**3.0 + (3.0/(2.0 * np.sqrt(np.pi))))  #Sherlock's approx
+    return x / (2.0*(x**3.0) + (3.0/(2.0 * np.sqrt(np.pi))))  #Sherlock's approx
 #### DIMENSIONLESS COEFFICIENTS DEFINITION #####
 def v_parallel(G, x):               #frictional coeff
     return -G(x)
+    #return -x / (2.0*x**3.0 + (3.0/(2.0 * np.sqrt(np.pi))))
 def v2_parallel(G, x):              #parallel diffusion coeff
     return G(x)/x
+    #return 1.0 / (2.0*x**3.0 + (3.0/(2.0 * np.sqrt(np.pi))))
 def v2_perp(G, x):                  #perpendicular diffusion coeff
     return (sp.erf(x) - G(x))/x
+    #return ((2.0*(x**2.0) - 1.0)/x)*G(x) + (2.0 / np.sqrt(np.pi))*np.exp(-x**2.0)
+    #return sp.erf(x)/x - 1.0/(2.0*x**3.0 + (3.0/(2.0 * np.sqrt(np.pi))))
+    #return ((2.0*x**2.0 - 1.0)/(2.0*x**3.0 + (3.0/(2.0 * np.sqrt(np.pi))))) + (2.0/np.sqrt(np.pi))*np.exp(-x**2.0)
 
 #### random functions #####
 def N(sigma): #we generate a random number with a centered normal distribution with standard deviation sigma
@@ -70,6 +73,7 @@ def c_quantities(c_vec):
     th = np.arccos(c_vec[2] / c)
     ph = np.arccos(c_vec[0] / c_perp)
     '''
+    if the c_vec has negative components, we have to uncomment this section
     if c_vec[2]>=0:
         th = np.arccos(c_vec[2] / c)                        #theta angle for the inverse matrix
     else:
@@ -125,8 +129,6 @@ def init_velocity():
     (vT, gamma_tb, Ac, Bc) = parameters()
     u = 1.0e5 * np.array([1.0 / 3.0, -1.0 / 2.0, -1.0 / 3.0])       #fluid velocity in lab frame
     v_ell = 1.0e5 * np.array([4.0 / 3.0, 1.0 / 2.0, 1.0 / 6.0])     #particle velocity in lab frame
-    #u = 1e5*np.array([0.0, 0.0, 0.0])
-    #v_ell = 1e5 * np.array([1.0, 1.0, 0.5])
     c_vec = v_ell - u                                               #particle velocity in fluid's frame
     return(c_vec, u, vT, v_ell, Ac, Bc)
 
@@ -145,7 +147,7 @@ def velocity_changes(vec, dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp):
     dvx = v_perp * np.cos(angle_perp)                       #x-component stochastic change
     dvy = v_perp * np.sin(angle_perp)                       #y-component stochastic change
     flim = limiting_factor(dt, G, v, vT, Ac, Bc)            #limiting factor computation
-    dvz = flim*(dvz_det) + dvz_sto                          #total change in z-component
+    dvz = flim*dvz_det + dvz_sto                          #total change in z-component
     dv = np.array([dvx, dvy, dvz])
     ########## ADDING THE VELOCITY CHANGES
     vec = vec + dv
@@ -165,20 +167,19 @@ def components_extraction(solc):
     return (vx, vy, vz)
 
 def time_evolution(Ntime, dt, vec, Ainv, u, v_ell, vT, Ac, Bc):
-    sol = np.zeros((Ntime+1, 3))        #we save the velocity after solving the problem
-    sol[0] =vec                         #we save the initial velocity
+    #This function evolves in time the velocity
+    sol = np.zeros((Ntime+1, 3))                #we save the velocity after solving the problem
+    sol[0] = vec                                #we save the initial velocity
     #from here we are in the fluid's frame of reference
     for i in range(Ntime):
-        vec = velocity_changes(vec, dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp) #it returns the new velocity
-        ######### SAVING THE SOLUTION AND THE TIME GRID
-        sol[i + 1] = vec                        #we save the new velocity in each time step in fluid's frame
-    #sol = matrix_resul(Ainv, sol)               #rotation to the lab frame
-    #sol = translation(sol, u)                   #fluid velocity in lab frame addition
+        sol[i + 1] = velocity_changes(sol[i], dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp) #it returns the new velocity
+    sol = matrix_resul(Ainv, sol)               #rotation to the lab frame
+    sol = translation(sol, u)                   #fluid velocity in lab frame addition
     sol = sol/linalg.norm(v_ell)                #normalization of the total solution
     return sol
 
 def average_values(M):
-    #With function we compute the average velocity of all the ensemble
+    #With this function we compute the average velocity of all the ensemble
     M = M.transpose()
     vxt = np.array([])
     for i in range(len(M)):
@@ -195,16 +196,16 @@ def norm(vx, vy, vz):
 def sherlock_func(N, delta):           #N is the number of particles in the beam
     #initializing the beam of N particles
     (c_vec, u, vT, v_ell, Ac, Bc) = init_velocity()  # vell is the modulus of v_ell to normalize the final solution
-    # c_vec is the particle velocity in fluid's frame, vT is the background thermal speed and U is the fluid velocity
-    (c0, Ainv) = c_quantities(c_vec)  # initial speed c0 and inverse matrix
-    vec = np.array([0.0, 0.0, c0])  # velocity in the fluid's frame, we rotate to z-component simply by v_z = c0
-    (tau_t, tau_parallel, tau_perp) = time_scales(G, c0, vT, Ac, Bc)  # Time scales computation
-    tau_ch = min(tau_t, tau_parallel, tau_perp)  # we choose the minimum time scale as characteristic time
+    #c_vec is the particle velocity in fluid's frame, vT is the background thermal speed and U is the fluid velocity
+    (c0, Ainv) = c_quantities(c_vec)    #initial speed c0 and inverse matrix
+    vec = np.array([0.0, 0.0, c0])      #velocity in the fluid's frame, we rotate to z-component simply by v_z = c0
+    (tau_t, tau_parallel, tau_perp) = time_scales(G, c0, vT, Ac, Bc)  #Time scales computation
+    tau_ch = min(tau_t, tau_parallel, tau_perp)  #we choose the minimum time scale as characteristic time
+    print(Ac, tau_ch, vT)
     a = 0.0
     b = 8.0
-    dt = delta * tau_ch  # we select dt much shorter than tau_ch
+    dt = delta * tau_ch  #we select dt much shorter than tau_ch
     Ntime = int((b - a) / delta)
-    print(tau_ch, linalg.norm(vec))
 
     t = np.arange(a, b + 0.01, delta)       #grid time from a to b in delta steps
     vx_matrix = np.zeros((N, Ntime+1))
@@ -221,15 +222,17 @@ def sherlock_func(N, delta):           #N is the number of particles in the beam
     vy_mean = average_values(vy_matrix)         #average vy
     vz_mean = average_values(vz_matrix)         #average vz
     v = norm(vx_mean, vy_mean, vz_mean)         #norm of the avergae speed
-    return (t, vx_mean,vy_mean,vz_mean, v)
+    return (t, v)
 
 def delta_Ti(vT, Ti, Te):
-    Z = 1
+    Z = 13
+    A = 27
     q_elec = 1.602176565e-19
     nb = 7e23
     lnCol = 17.0
     me = 9.10938291e-31
-    mi = me
+    mp = 1.672621898e-27
+    mi = A * mp
     nu_e = (16.0*np.sqrt(np.pi)*(Z**2.0)*(q_elec**4.0)*nb*lnCol)/(me*mi*vT**3.0)
     dTi = -(2.0/3.0)*nu_e*(Ti - Te)
     return (dTi, 1.0/nu_e)
@@ -240,7 +243,9 @@ def temperature_equilibrium(Ntime, delta):
     Ti = 10*Te
     Ti0 = Ti
     me = 9.10938291e-31
-    mi = me
+    mp = 1.672621898e-27
+    A = 23
+    mi = A*mp
     vT = np.sqrt(2.0*(Ti/mi + Te/me))
     (dT0, tau_e) = delta_Ti(vT, Ti, Te)
     dt = delta*tau_e
@@ -248,7 +253,7 @@ def temperature_equilibrium(Ntime, delta):
     T = np.append(T, Ti0/Ti0)
     for i in range(Ntime):
         (dT, tau_e) = delta_Ti(vT, Ti, Te)
-        Ti = Ti + delta*tau_e*dT
+        Ti = Ti + dt*dT
         vT = np.sqrt(2.0 * (Ti / mi + Te / me))
         T = np.append(T, Ti / Ti0)
     return T
@@ -264,6 +269,3 @@ def sherlock_funcT(N, delta):           #N is the number of particles in the bea
         T_matrix[i] = TN
     T = average_values(T_matrix)         #average vx
     return (t, T)
-
-
-
