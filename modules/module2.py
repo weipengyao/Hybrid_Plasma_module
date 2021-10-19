@@ -72,6 +72,44 @@ def sherlock_func(N, delta):           #N is the number of particles in the beam
     
     return (t, v)
 
+def sherlock_func_test(N, delta):           #N is the number of particles in the beam
+    '''
+    Implementation of Sherlock's algorithm for particle-fluid collision [J. Comp. Phys. 2008]
+
+        Parameters: 
+            N (int): The number of particles in the beam
+            delta (float): The time-step
+        Returns:
+            two arrays of time and velocities
+
+    '''
+    (c_vec, u, vT, v_ell, Ac, Bc) = init_velocity()  
+    (c0, Ainv) = c_quantities(c_vec)
+    vec = np.array([0.0, 0.0, c0])        
+    (tau_t, tau_parallel, tau_perp) = time_scales(G, c0, vT, Ac, Bc)   
+    tau_ch = min(tau_t, tau_parallel, tau_perp)    
+    a = 0.0  # time start ?
+    b = 8.0  # time end ?
+    dt = delta * tau_ch  
+    Ntime = int((b - a) / delta)
+    t = np.arange(a, b + delta, delta)
+
+    vx_matrix = np.zeros((N, Ntime+1))
+    vy_matrix = np.zeros((N, Ntime+1))
+    vz_matrix = np.zeros((N, Ntime+1))
+    for i in range(N):          
+        sol, arr_tau_t, arr_tau_parallel, arr_tau_perp = time_evolution_test(Ntime, dt, vec, Ainv, u, v_ell, vT, Ac, Bc, c0)
+        (vx, vy, vz) = components_extraction(sol)
+        vx_matrix[i] = vx
+        vy_matrix[i] = vy
+        vz_matrix[i] = vz
+    vx_mean = average_values(vx_matrix)         #average vx
+    vy_mean = average_values(vy_matrix)         #average vy
+    vz_mean = average_values(vz_matrix)         #average vz
+    v = norm(vx_mean, vy_mean, vz_mean)         #norm of the avergae speed
+    
+    return (t, v, arr_tau_t, arr_tau_parallel, arr_tau_perp)
+
 def changes_in_velocity(vec, dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp):
     '''
     Calculation of the velocity change due to the particle-fluid collision
@@ -140,6 +178,54 @@ def time_evolution(Ntime, dt, vec, Ainv, u, v_ell, vT, Ac, Bc):
     sol = translation(sol, u)                   # change from the fluid velocity to the lab frame 
     sol = sol/linalg.norm(v_ell)                # normalization of the total solution
     return sol
+
+def time_evolution_test(Ntime, dt, vec, Ainv, u, v_ell, vT, Ac, Bc, c0):
+    '''
+    This function evolves in time the velocity
+    '''
+    sol = np.zeros((Ntime+1, 3))                # we save the velocity after solving the problem
+    sol[0] = vec                                # we save the initial velocity
+    arr_tau_t        = np.zeros(Ntime+1)
+    arr_tau_parallel = np.zeros(Ntime+1)
+    arr_tau_perp     = np.zeros(Ntime+1)
+
+    (arr_tau_t[0], arr_tau_parallel[0], arr_tau_perp[0]) = time_scales(G, c0, vT, Ac, Bc) 
+
+    #from here we are in the fluid's frame of reference
+    # we loop over all timesteps to get each particle velocity change due to collision in the fluid frame along z-axis 
+    for i in range(Ntime):
+        (sol[i + 1], dt, arr_tau_t[i+1], arr_tau_parallel[i+1], arr_tau_perp[i+1]) = changes_in_velocity_test(sol[i], dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp) 
+
+        # it returns the new velocity
+    sol = matrix_resul(Ainv, sol)               # rotation to the fluid velocity NOT along the z-axis
+    sol = translation(sol, u)                   # change from the fluid velocity to the lab frame 
+    sol = sol/linalg.norm(v_ell)                # normalization of the total solution
+    return sol, arr_tau_t, arr_tau_parallel, arr_tau_perp
+
+def changes_in_velocity_test(vec, dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp):
+    '''
+    Calculation of the velocity change due to the particle-fluid collision
+    '''
+    v = linalg.norm(vec)                                    #norm of the particle velocity in fluid's frame
+    x = v/vT                                                #velocity ratio this is sqrt(x) = v/vT
+    (flim, tau_t, tau_parallel, tau_perp) = limiting_factor_test(dt, G, v, vT, Ac, Bc)            #limiting factor computation
+    ############## DETERMINISTIC EVOLUTION ##############
+    dvz_det = dt * (Ac * v_parallel(G, x))
+    ############# STANDARD DEVIATIONS COMPUTATION  ##############
+    sigma_parallel = np.sqrt(dt * Bc * abs(v2_parallel(G, x)))
+    sigma_perp = np.sqrt(dt * Bc * abs(v2_perp(G, x)))        # here the abs() is a must since it is under the sqrt().
+    ########## COMPUTATION OF THE STOCHASTIC CHANGES ###########
+    dvz_sto = N(sigma_parallel)                             #z-component stochastic change
+    v_perp = N(sigma_perp)                                  #random velocity modulus in diffusion process
+    angle_perp = theta()                                    #random scattering angle in diffusion process
+    dvx = v_perp * np.cos(angle_perp)                       #x-component stochastic change
+    dvy = v_perp * np.sin(angle_perp)                       #y-component stochastic change
+    dvz = flim*dvz_det + dvz_sto                          #total change in z-component
+    # dvz = flim*dvz_det                                      # @yaowp: dvz_sto is 100 times larger than dvz_det and dvxy
+    dv = np.array([dvx, dvy, dvz])
+    ########## ADDING THE VELOCITY CHANGES
+    vec = vec + dv
+    return (vec, dt, tau_t, tau_parallel, tau_perp)      
 
 def parameters():
     '''
@@ -266,6 +352,11 @@ def time_scales(G, v, vT, Ac, Bc):
     tau_t = v / (Ac*abs(v_parallel(G, x)))                      #slowing characteristic time
     tau_parallel = v**2.0 / (Bc*abs(v2_parallel(G, x)))         #parallel diffusion characteristic time
     tau_perp = v**2.0 / (Bc*abs(v2_perp(G, x)))                 #perpendicular diffusion characteristic time
+    # print('tau_t = {:.2e}'.format(tau_t))
+    # print('tau_parallel = {:.2e}'.format(tau_parallel))
+    # print('tau_perp = {:.2e}'.format(tau_perp))
+    if(min(tau_t,tau_parallel,tau_perp) - tau_t > 0.0):
+        print('tau_t is not the min.')
     return (tau_t, tau_parallel, tau_perp)
 
 def init_velocity():
@@ -295,10 +386,27 @@ def limiting_factor(dt, G, v, vT, Ac, Bc):
     '''
     (tau_t, tau_parallel, tau_perp) = time_scales(G, v, vT, Ac, Bc)
     flim = min(1.0, tau_t / (2.0 * dt), tau_parallel / (2.0 * dt), tau_perp / (2.0 * dt))
-    # print('tau_t = {:.2e}'.format(tau_t / (2.0 * dt)))
-    # print('tau_parallel = {:.2e}'.format(tau_parallel / (2.0 * dt)))
-    # print('tau_perp = {:.2e}'.format(tau_perp / (2.0 * dt)))
+    # print('tau_t / 2dt = {:.2e}'.format(tau_t / (2.0 * dt)))
+    # print('tau_parallel / 2dt = {:.2e}'.format(tau_parallel / (2.0 * dt)))
+    # print('tau_perp / 2dt = {:.2e}'.format(tau_perp / (2.0 * dt)))
+    # print('flim = {:.2e}'.format(flim))
+    # if((1.0 - flim) > 0.0): 
+    #     print('flim is smaller than 1.0')
     return flim
+
+def limiting_factor_test(dt, G, v, vT, Ac, Bc):
+    '''
+    Ensure that the time-step will always be less than the relevant relaxation time for every particle
+    '''
+    (tau_t, tau_parallel, tau_perp) = time_scales(G, v, vT, Ac, Bc)
+    flim = min(1.0, tau_t / (2.0 * dt), tau_parallel / (2.0 * dt), tau_perp / (2.0 * dt))
+    # print('tau_t / 2dt = {:.2e}'.format(tau_t / (2.0 * dt)))
+    # print('tau_parallel / 2dt = {:.2e}'.format(tau_parallel / (2.0 * dt)))
+    # print('tau_perp / 2dt = {:.2e}'.format(tau_perp / (2.0 * dt)))
+    # print('flim = {:.2e}'.format(flim))
+    # if((1.0 - flim) > 0.0): 
+    #     print('flim is smaller than 1.0')
+    return  (flim, tau_t, tau_parallel, tau_perp)
 
 def components_extraction(solc):
     # this function extract the velocity components from the total solution
