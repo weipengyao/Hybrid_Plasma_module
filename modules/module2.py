@@ -98,7 +98,7 @@ def sherlock_func_test(N, delta):           #N is the number of particles in the
     vy_matrix = np.zeros((N, Ntime+1))
     vz_matrix = np.zeros((N, Ntime+1))
     for i in range(N):          
-        sol, arr_tau_t, arr_tau_parallel, arr_tau_perp = time_evolution_test(Ntime, dt, vec, Ainv, u, v_ell, vT, Ac, Bc, c0)
+        sol, arr_tau_t, arr_tau_parallel, arr_tau_perp, arr_flim, arr_dt = time_evolution_test(Ntime, dt, vec, Ainv, u, v_ell, vT, Ac, Bc, c0)
         (vx, vy, vz) = components_extraction(sol)
         vx_matrix[i] = vx
         vy_matrix[i] = vy
@@ -108,7 +108,7 @@ def sherlock_func_test(N, delta):           #N is the number of particles in the
     vz_mean = average_values(vz_matrix)         #average vz
     v = norm(vx_mean, vy_mean, vz_mean)         #norm of the avergae speed
     
-    return (t, v, arr_tau_t, arr_tau_parallel, arr_tau_perp)
+    return (t, v, arr_tau_t, arr_tau_parallel, arr_tau_perp, arr_flim, arr_dt)
 
 def changes_in_velocity(vec, dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp):
     '''
@@ -188,19 +188,23 @@ def time_evolution_test(Ntime, dt, vec, Ainv, u, v_ell, vT, Ac, Bc, c0):
     arr_tau_t        = np.zeros(Ntime+1)
     arr_tau_parallel = np.zeros(Ntime+1)
     arr_tau_perp     = np.zeros(Ntime+1)
+    arr_flim         = np.zeros(Ntime+1)
+    arr_dt           = np.zeros(Ntime+1)
 
     (arr_tau_t[0], arr_tau_parallel[0], arr_tau_perp[0]) = time_scales(G, c0, vT, Ac, Bc) 
+    arr_flim[0] = 1.0
+    arr_dt[0] = dt
 
     #from here we are in the fluid's frame of reference
     # we loop over all timesteps to get each particle velocity change due to collision in the fluid frame along z-axis 
     for i in range(Ntime):
-        (sol[i + 1], dt, arr_tau_t[i+1], arr_tau_parallel[i+1], arr_tau_perp[i+1]) = changes_in_velocity_test(sol[i], dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp) 
+        (sol[i + 1], arr_dt[i+1], arr_tau_t[i+1], arr_tau_parallel[i+1], arr_tau_perp[i+1], arr_flim[i+1]) = changes_in_velocity_test(sol[i], arr_dt[i], vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp) 
 
         # it returns the new velocity
     sol = matrix_resul(Ainv, sol)               # rotation to the fluid velocity NOT along the z-axis
     sol = translation(sol, u)                   # change from the fluid velocity to the lab frame 
     sol = sol/linalg.norm(v_ell)                # normalization of the total solution
-    return sol, arr_tau_t, arr_tau_parallel, arr_tau_perp
+    return sol, arr_tau_t, arr_tau_parallel, arr_tau_perp, arr_flim, arr_dt
 
 def changes_in_velocity_test(vec, dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2_perp):
     '''
@@ -225,7 +229,7 @@ def changes_in_velocity_test(vec, dt, vT, Ac, Bc, G, v_parallel, v2_parallel, v2
     dv = np.array([dvx, dvy, dvz])
     ########## ADDING THE VELOCITY CHANGES
     vec = vec + dv
-    return (vec, dt, tau_t, tau_parallel, tau_perp)      
+    return (vec, dt, tau_t, tau_parallel, tau_perp, flim)      
 
 def parameters():
     '''
@@ -238,7 +242,7 @@ def parameters():
             Bc: ???
     '''
     Zb = 1                                  #Z for background, we set an electron-fluid background
-    Z = 13                                  #Z for ions, we use Aluminum ions
+    Z = 1                                  #Z for ions, we use Aluminum ions
     A = 27                                  #mass number for ions, we use alumnium
     me = 9.10938291e-31                     #electron mass
     mp = 1.672621898e-27                    #proton mass
@@ -247,15 +251,15 @@ def parameters():
     # nb = 7e22
     q_elec = 1.602176565e-19                #electron charge
     qt = Z*q_elec                           #test particle charge, we consider an electron
-    qb = -Zb*qt                             #background ion-particle charges ???
-    # qb = -Zb*q_elec                         # background is electron
+    # qb = -Zb*qt                             #background ion-particle charges ???
+    qb = -Zb*q_elec                         # background is electron
     lnCol = 17.0                            #Coulomb logarithm experimental value for laboratory plasma
     # lnCol = 3.0
     e_0 = 8.8541878176204e-12               #vacuum permittivity
     eV = 1.60217733e-19                     #eV to Jules
     kT = 1.0                                #electron temperature times Boltzmann constant
-    mu = 8.0e7                              # @yaowp: ???
-    # mu = mi/me                              # test particle Al ion and fluid electron ???
+    # mu = 8.0e7                              # @yaowp: ???
+    mu = mi/me                              # test particle Al ion and fluid electron ???
 
     gamma_tb = (qt**2.0 * qb**2.0 * nb * lnCol)/(2.0 * np.pi * e_0**2.0 * mi**2.0)  #Gamma_tb factor
     vT = np.sqrt(2.0*kT*eV/me)                                                     #thermal speed
@@ -355,7 +359,7 @@ def time_scales(G, v, vT, Ac, Bc):
     # print('tau_t = {:.2e}'.format(tau_t))
     # print('tau_parallel = {:.2e}'.format(tau_parallel))
     # print('tau_perp = {:.2e}'.format(tau_perp))
-    if(min(tau_t,tau_parallel,tau_perp) - tau_t > 0.0):
+    if(min(tau_t,tau_parallel,tau_perp) - tau_t >= 1.0e-20):
         print('tau_t is not the min.')
     return (tau_t, tau_parallel, tau_perp)
 
